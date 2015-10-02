@@ -39,6 +39,8 @@
 #include "geometry_msgs/Twist.h"
 #include "sensor_msgs/Joy.h"
 
+#define ABS_MAX_BUTTON_CODE 100
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "spacenav");
@@ -82,10 +84,19 @@ int main(int argc, char **argv)
   ros::param::get("~/static_trans_deadband",static_trans_deadband);
   ros::param::get("~/static_rot_deadband",static_rot_deadband);
 
+  int max_button_code = 1;
+  ros::param::get("~/max_button_code", max_button_code);
+
   sensor_msgs::Joy joystick_msg;
   joystick_msg.axes.resize(6);
-  joystick_msg.buttons.resize(2);
-  
+  // sanity check
+  if (max_button_code > ABS_MAX_BUTTON_CODE)
+    max_button_code = ABS_MAX_BUTTON_CODE;
+  if (max_button_code <= 1)
+    max_button_code = 1;
+
+  joystick_msg.buttons.resize(max_button_code+1);
+
   spnav_event sev;
   int no_motion_count = 0;
   bool motion_stale = false;
@@ -96,7 +107,7 @@ int main(int argc, char **argv)
   {
     bool joy_stale = false;
     bool queue_empty = false;
-    
+
     // Sleep when the queue is empty.
     // If the queue is empty 30 times in a row output zeros.
     // Output changes each time a button event happens, or when a motion
@@ -108,7 +119,7 @@ int main(int argc, char **argv)
         queue_empty = true;
         if (++no_motion_count > static_count_threshold)
         {
-          if ( zero_when_static || 
+          if ( zero_when_static ||
               ( fabs(offset_msg.x) < static_trans_deadband &&
                 fabs(offset_msg.y) < static_trans_deadband &&
                 fabs(offset_msg.z) < static_trans_deadband)
@@ -117,7 +128,7 @@ int main(int argc, char **argv)
             offset_msg.x = offset_msg.y = offset_msg.z = 0;
           }
 
-          if ( zero_when_static || 
+          if ( zero_when_static ||
               ( fabs(rot_offset_msg.x) < static_rot_deadband &&
                 fabs(rot_offset_msg.y) < static_rot_deadband &&
                 fabs(rot_offset_msg.z) < static_rot_deadband )
@@ -142,10 +153,13 @@ int main(int argc, char **argv)
 
         motion_stale = true;
         break;
-        
+
       case SPNAV_EVENT_BUTTON:
         //printf("type, press, bnum = <%d, %d, %d>\n", sev.button.type, sev.button.press, sev.button.bnum);
-        joystick_msg.buttons[sev.button.bnum] = sev.button.press;
+        if (sev.button.bnum < joystick_msg.buttons.size())
+        {
+          joystick_msg.buttons[sev.button.bnum] = sev.button.press;
+        }
 
         joy_stale = true;
         break;
@@ -154,7 +168,7 @@ int main(int argc, char **argv)
         ROS_WARN("Unknown message type in spacenav. This should never happen.");
         break;
     }
-  
+
     if (motion_stale && (queue_empty || joy_stale))
     {
       offset_pub.publish(offset_msg);
@@ -175,7 +189,7 @@ int main(int argc, char **argv)
       motion_stale = false;
       joy_stale = true;
     }
-  
+
     if (joy_stale)
     {
       joy_pub.publish(joystick_msg);
